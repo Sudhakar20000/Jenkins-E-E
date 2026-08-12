@@ -1,0 +1,21 @@
+#!/bin/bash
+set -ex
+exec > >(tee /var/log/user-data.log) 2>&1
+growpart /dev/nvme0n1 4
+pvresize /dev/nvme0n1p4
+
+lvextend -r -L +${extend_size}G /dev/RootVG/varVol
+xfs_growfs /var
+
+lvextend -r -L +${extend_size}G /dev/RootVG/homeVol
+xfs_growfs /home
+
+lvextend -r -L +${extend_size}G /dev/RootVG/rootVol
+xfs_growfs /
+
+curl -o /etc/yum.repos.d/jenkins.repo     https://pkg.jenkins.io/rpm-stable/jenkins.repo
+yum install fontconfig java-21-openjdk -y
+yum install jenkins -y
+systemctl daemon-reload
+systemctl start jenkins
+systemctl enable jenkins

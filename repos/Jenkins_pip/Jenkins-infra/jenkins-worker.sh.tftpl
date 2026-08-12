@@ -1,0 +1,27 @@
+#!/bin/bash
+set -ex
+exec > >(tee /var/log/user-data.log) 2>&1
+
+cloud-init status --wait
+
+growpart /dev/nvme0n1 ${partition_number}
+pvresize /dev/nvme0n1p4
+
+lvextend -r -L +${extend_size}G /dev/RootVG/varVol
+xfs_growfs /var
+
+lvextend -r -L +${extend_size}G /dev/RootVG/homeVol
+xfs_growfs /home
+
+lvextend -r -L +${extend_size}G /dev/RootVG/rootVol
+xfs_growfs /
+
+yum install fontconfig java-21-openjdk -y
+yum install npm -y
+
+dnf -y install dnf-plugins-core
+dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ec2-user
