@@ -1,0 +1,12 @@
+pipeline {
+    agent { 
+        label 'linux-node' 
+    }
+    stages {
+        stage("state -1") {
+            steps {
+                echo "hello world"
+            }
+        }
+    }
+}
