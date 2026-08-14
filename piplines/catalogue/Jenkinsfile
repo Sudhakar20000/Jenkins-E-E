@@ -32,23 +32,16 @@ pipeline {
             steps {
                 dir('piplines/catalogue') {
                     script {
-
                         echo 'Reading application version from package.json...'
 
-                        def packageJson = readJSON file: 'package.json'
-
-                        echo "Package name: ${packageJson.name}"
-                        echo "Package version: ${packageJson.version}"
-
-                        if (!packageJson.version) {
-                            error 'Version is missing from package.json'
-                        }
-
-                        env.APP_VERSION = packageJson.version.toString().trim()
+                        env.APP_VERSION = sh(
+                            script: "jq -r '.version' package.json",
+                            returnStdout: true
+                        ).trim()
 
                         echo "Application Version: ${env.APP_VERSION}"
 
-                        if (!env.APP_VERSION || env.APP_VERSION == 'null') {
+                        if (!env.APP_VERSION || env.APP_VERSION == 'null' || env.APP_VERSION == '') {
                             error 'Application version could not be read from package.json'
                         }
                     }
