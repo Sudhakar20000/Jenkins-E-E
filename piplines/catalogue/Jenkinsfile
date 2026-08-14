@@ -28,28 +28,23 @@ pipeline {
 
     stages {
 
-        stage('Read version') {
-            steps {
-                dir('piplines/catalogue') {
+        stages {
+            stage('Read version') {
+                steps {
                     script {
-                        echo 'Reading application version from package.json...'
-
-                        sh 'pwd && ls -la && echo "--- package.json content ---" && cat package.json'
-
-                        env.APP_VERSION = sh(
-                            script: "jq -r '.version' package.json",
-                            returnStdout: true
-                        ).trim()
-
-                        echo "Application Version: ${env.APP_VERSION}"
-
-                        if (!env.APP_VERSION || env.APP_VERSION == 'null' || env.APP_VERSION == '') {
-                            error 'Application version could not be read from package.json'
-                        }
+                        // Read the package.json file
+                        def packageJson = readJSON file: 'package.json'
+                        
+                        // Extract the version property
+                        def appVersion = packageJson.version
+                        
+                        // Print the version (Requires double quotes for interpolation)
+                        echo "The application version is: ${appVersion}"
                     }
                 }
             }
         }
+
 
         stage('Install Dependencies') {
             steps {
