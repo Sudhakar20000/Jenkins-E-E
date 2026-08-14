@@ -1,0 +1,31 @@
+{
+  "name": "catalogue",
+  "version": "1.0.0",
+  "description": "product catalogue REST API",
+  "main": "server.js",
+  "scripts": {
+    "test": "jest --testPathPattern=test/ --coverage --forceExit"
+  },
+  "jest": {
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["lcov", "text", "clover"],
+    "testResultsProcessor": "jest-junit"
+  },
+  "author": "SteveW",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "jest-junit": "^16.0.0",
+    "supertest": "^7.0.0"
+  },
+  "dependencies": {
+    "body-parser": "^1.18.1",
+    "express": "^4.15.4",
+    "mongodb": "^4.7.0",
+    "pino": "^5.10.8",
+    "express-pino-logger": "^4.0.0",
+    "pino-pretty": "^2.5.0",
+    "@instana/collector": "^1.132.2",
+    "redis": "^3.1.1"
+  }
+}

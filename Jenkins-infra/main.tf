@@ -59,7 +59,7 @@ resource "aws_instance" "jenkins_worker" {
   ]
   user_data = templatefile("${path.module}/jenkins-worker.sh.tftpl", {
     partition_number = 4
-    extend_size      = 30
+    extend_size      = 10
   })
   root_block_device {
     volume_size = 50
