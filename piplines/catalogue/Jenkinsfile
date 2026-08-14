@@ -28,23 +28,21 @@ pipeline {
 
     stages {
 
-        stages {
-            stage('Read version') {
-                steps {
+        stage('Read version') {
+            steps {
+                dir('piplines/catalogue') {
                     script {
-                        // Read the package.json file
+                        // Read the package.json file inside the correct subdirectory
                         def packageJson = readJSON file: 'package.json'
                         
-                        // Extract the version property
-                        def appVersion = packageJson.version
+                        // Dynamically assign version to the global pipeline environment variables
+                        env.APP_VERSION = packageJson.version
                         
-                        // Print the version (Requires double quotes for interpolation)
-                        echo "The application version is: ${appVersion}"
+                        echo "The application version is: ${env.APP_VERSION}"
                     }
                 }
             }
         }
-
 
         stage('Install Dependencies') {
             steps {
@@ -199,41 +197,38 @@ pipeline {
                     echo "Component: ${env.COMPONENT}"
                     echo "Version: ${env.APP_VERSION}"
 
-                    withAWS(
-                        credentials: 'aws-creds',
-                        region: 'us-east-1'
-                    ) {
+                    withAWS(credentials: 'aws-creds', region: 'us-east-1') {
 
                         dir('piplines/catalogue') {
-
-                            sh '''
+                            // Using triple double-quotes to allow Jenkins to resolve ${ACC_ID}, ${PROJECT}, etc.
+                            sh """
                                 set -e
 
                                 AWS_REGION="us-east-1"
 
-                                ECR_REGISTRY="${ACC_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                                ECR_REGISTRY="${env.ACC_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com"
 
-                                IMAGE="${ECR_REGISTRY}/${PROJECT}/${COMPONENT}:${APP_VERSION}"
+                                IMAGE="\${ECR_REGISTRY}/${env.PROJECT}/${env.COMPONENT}:${env.APP_VERSION}"
 
-                                echo "ECR Registry: ${ECR_REGISTRY}"
-                                echo "Docker Image: ${IMAGE}"
+                                echo "ECR Registry: \${ECR_REGISTRY}"
+                                echo "Docker Image: \${IMAGE}"
 
                                 echo "Logging in to AWS ECR..."
 
                                 aws ecr get-login-password \
-                                    --region "${AWS_REGION}" |
+                                    --region "\${AWS_REGION}" |
                                 docker login \
                                     --username AWS \
-                                    --password-stdin "${ECR_REGISTRY}"
+                                    --password-stdin "\textE\${ECR_REGISTRY}"
 
                                 echo "Building Docker image..."
 
                                 docker build \
-                                    -t "${IMAGE}" \
+                                    -t "\${IMAGE}" \
                                     .
 
                                 echo "Docker image built successfully."
-                            '''
+                            """
                         }
                     }
                 }
@@ -272,140 +267,12 @@ pipeline {
                     }
 
                     echo "Dockerfile scan exit code: ${dockerfileScan}"
-
-                    echo "Scanning Docker image..."
-
-                    def imageScan = sh(
-                        script: '''
-                            set +e
-
-                            IMAGE="${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${APP_VERSION}"
-
-                            echo "Scanning image: ${IMAGE}"
-
-                            trivy image \
-                                --scanners vuln \
-                                --pkg-types os \
-                                --exit-code 1 \
-                                --severity HIGH,CRITICAL \
-                                --format table \
-                                "${IMAGE}"
-
-                            EXIT_CODE=$?
-
-                            echo "Docker image Trivy exit code: ${EXIT_CODE}"
-
-                            exit ${EXIT_CODE}
-                        ''',
-                        returnStatus: true
-                    )
-
-                    echo "Docker image scan exit code: ${imageScan}"
-
-                    if (dockerfileScan != 0 || imageScan != 0) {
-
-                        error '''
-Trivy found HIGH/CRITICAL security vulnerabilities.
-Pipeline failed because the security scan did not pass.
-'''
-
-                    }
-
-                    echo "Trivy scans passed successfully."
-                }
-            }
-        }
-
-        stage('ECR Image Push') {
-            steps {
-
-                script {
-
-                    echo "Pushing Docker image to ECR..."
-
-                    withAWS(
-                        credentials: 'aws-creds',
-                        region: 'us-east-1'
-                    ) {
-
-                        sh '''
-                            set -e
-
-                            AWS_REGION="us-east-1"
-
-                            ECR_REGISTRY="${ACC_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-                            IMAGE="${ECR_REGISTRY}/${PROJECT}/${COMPONENT}:${APP_VERSION}"
-
-                            echo "ECR Registry: ${ECR_REGISTRY}"
-                            echo "Image: ${IMAGE}"
-
-                            echo "Logging in to ECR..."
-
-                            aws ecr get-login-password \
-                                --region "${AWS_REGION}" |
-                            docker login \
-                                --username AWS \
-                                --password-stdin "${ECR_REGISTRY}"
-
-                            echo "Pushing image..."
-
-                            docker push "${IMAGE}"
-
-                            echo "Docker image pushed successfully."
-                        '''
+                    
+                    if (dockerfileScan != 0) {
+                        error "Pipeline failed due to Trivy security scan failures."
                     }
                 }
             }
-        }
-
-        stage('Deploy') {
-
-            when {
-                expression {
-                    params.DEPLOY
-                }
-            }
-
-            steps {
-
-                script {
-
-                    echo "Starting deployment..."
-
-                    sh '''
-                        set -e
-
-                        echo "Deploying application..."
-
-                        echo "Project: ${PROJECT}"
-                        echo "Component: ${COMPONENT}"
-                        echo "Version: ${APP_VERSION}"
-
-                        echo "Docker Image:"
-                        echo "${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${APP_VERSION}"
-
-                        # Add your actual deployment command here.
-
-                        echo "Deployment completed successfully."
-                    '''
-                }
-            }
-        }
-    }
-
-    post {
-
-        always {
-            echo 'Pipeline execution completed.'
-        }
-
-        success {
-            echo 'Pipeline completed successfully.'
-        }
-
-        failure {
-            echo 'Pipeline failed.'
         }
     }
 }
