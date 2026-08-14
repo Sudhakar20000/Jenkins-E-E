@@ -27,9 +27,7 @@ pipeline {
     }
 
     stages {
-
-          stages {
-                    stage('Read Version') {
+             stage('Read Version') {
                 steps {
                     script {
                         def packageJson = readJSON file: 'workspaces/flipkart/pipelines/catalogue/package.json'
