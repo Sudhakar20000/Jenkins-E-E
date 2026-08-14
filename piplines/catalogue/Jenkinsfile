@@ -34,6 +34,8 @@ pipeline {
                     script {
                         echo 'Reading application version from package.json...'
 
+                        sh 'pwd && ls -la && echo "--- package.json content ---" && cat package.json'
+
                         env.APP_VERSION = sh(
                             script: "jq -r '.version' package.json",
                             returnStdout: true
