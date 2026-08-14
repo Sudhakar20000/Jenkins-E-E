@@ -28,24 +28,17 @@ pipeline {
 
     stages {
 
-        stage('Read version') {
-            steps {
-                dir('piplines/catalogue') {
-                    script {
-                        // Change directory to sub-folder and extract version using node
-                        def appVersion = sh(
-                            script: "node -p \"require('./package.json').version\"", 
-                            returnStdout: true
-                        ).trim()
-                        
-                        // Assign to the global environment block
-                        env.APP_VERSION = appVersion
-                        
-                        echo "The application version parsed via Node is: ${env.APP_VERSION}"
+          stages {
+                stage('Read version'){
+                    steps{
+                        script {
+                            def packageJson = readJSON file: 'package.json'
+                            // Extract the version property
+                            appVersion = packageJson.version
+                            echo "The application version is: ${appVersion}"
+                        }
                     }
                 }
-            }
-        }
 
 
 
