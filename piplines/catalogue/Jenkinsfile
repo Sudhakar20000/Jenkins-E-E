@@ -30,19 +30,21 @@ pipeline {
 
         stage('Read version') {
             steps {
-                dir('piplines/catalogue') {
-                    script {
-                        // Read the package.json file inside the correct subdirectory
-                        def packageJson = readJSON file: 'package.json'
-                        
-                        // Dynamically assign version to the global pipeline environment variables
-                        env.APP_VERSION = packageJson.version
-                        
-                        echo "The application version is: ${env.APP_VERSION}"
-                    }
+                script {
+                    // Evaluates the version directly using node's built-in require mechanism
+                    def appVersion = sh(
+                        script: "node -p \"require('./package.json').version\"", 
+                        returnStdout: true
+                    ).trim()
+                    
+                    // Assign to the global environment block
+                    env.APP_VERSION = appVersion
+                    
+                    echo "The application version parsed via Node is: ${env.APP_VERSION}"
                 }
             }
         }
+
 
         stage('Install Dependencies') {
             steps {
