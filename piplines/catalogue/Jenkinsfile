@@ -30,41 +30,90 @@ pipeline {
 
         stage('Read version') {
             steps {
-                script {
-                    def packageJson = readJSON file: 'package.json'
+                dir('piplines/catalogue') {
+                    script {
+                        echo 'Reading application version...'
 
-                    env.appVersion = packageJson.version
+                        sh '''
+                            set -e
 
-                    echo "Application version: ${env.appVersion}"
+                            echo "Current directory:"
+                            pwd
+
+                            echo "Files:"
+                            ls -la
+
+                            if [ ! -f package.json ]; then
+                                echo "ERROR: package.json not found"
+                                exit 1
+                            fi
+
+                            echo "package.json found"
+                        '''
+
+                        env.appVersion = sh(
+                            script: 'node -p "require(\'./package.json\').version"',
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Application version: ${env.appVersion}"
+                    }
                 }
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                sh '''
-                    set -e
-                    npm install
-                '''
+                dir('piplines/catalogue') {
+                    sh '''
+                        set -e
+
+                        echo "Node version:"
+                        node --version
+
+                        echo "NPM version:"
+                        npm --version
+
+                        echo "Installing dependencies..."
+
+                        npm install
+
+                        echo "Dependencies installed successfully."
+                    '''
+                }
             }
         }
 
         stage('Unit tests') {
             steps {
-                sh '''
-                    set -e
-                    npm test
-                '''
+                dir('piplines/catalogue') {
+                    sh '''
+                        set -e
+
+                        echo "Running unit tests..."
+
+                        npm test
+
+                        echo "Unit tests completed successfully."
+                    '''
+                }
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh '''
-                        set -e
-                        ${SONAR_SCANNER_HOME}/bin/sonar-scanner
-                    '''
+                dir('piplines/catalogue') {
+                    withSonarQubeEnv('sonar-server') {
+                        sh """
+                            set -e
+
+                            echo "Starting SonarQube analysis..."
+
+                            ${tool 'sonar-8'}/bin/sonar-scanner
+
+                            echo "SonarQube analysis completed."
+                        """
+                    }
                 }
             }
         }
@@ -73,13 +122,18 @@ pipeline {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
+
+                        echo 'Waiting for SonarQube Quality Gate...'
+
                         def qg = waitForQualityGate()
 
+                        echo "SonarQube Quality Gate status: ${qg.status}"
+
                         if (qg.status != 'OK') {
-                            error "Pipeline aborted because SonarQube Quality Gate status is: ${qg.status}"
+                            error "Pipeline aborted: SonarQube Quality Gate status is ${qg.status}"
                         }
 
-                        echo "SonarQube Quality Gate passed: ${qg.status}"
+                        echo 'SonarQube Quality Gate passed.'
                     }
                 }
             }
@@ -98,7 +152,8 @@ pipeline {
 
                         REPO="daws-90s/catalogue"
 
-                        echo "Checking Dependabot alerts for ${REPO}..."
+                        echo "Checking Dependabot alerts..."
+                        echo "Repository: ${REPO}"
 
                         curl -sS -L \
                             -H "Accept: application/vnd.github+json" \
@@ -129,7 +184,7 @@ pipeline {
 
                         if [ "${HIGH_CRITICAL_COUNT}" -gt 0 ]; then
                             echo "Found ${HIGH_CRITICAL_COUNT} High/Critical dependency alert(s)."
-                            echo "Failing the build."
+                            echo "Failing pipeline."
                             exit 1
                         else
                             echo "No High/Critical dependency alerts found."
@@ -142,36 +197,42 @@ pipeline {
         stage('Docker Build') {
             steps {
                 script {
+
                     echo "Building Docker image..."
-                    echo "Image version: ${env.appVersion}"
+                    echo "Application version: ${env.appVersion}"
 
                     withAWS(
                         credentials: 'aws-creds',
                         region: 'us-east-1'
                     ) {
-                        sh '''
-                            set -e
 
-                            AWS_REGION="us-east-1"
-                            ECR_REGISTRY="${acc_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-                            IMAGE="${ECR_REGISTRY}/${project}/${component}:${appVersion}"
+                        dir('piplines/catalogue') {
 
-                            echo "Logging in to AWS ECR..."
+                            sh '''
+                                set -e
 
-                            aws ecr get-login-password \
-                                --region "${AWS_REGION}" |
-                            docker login \
-                                --username AWS \
-                                --password-stdin "${ECR_REGISTRY}"
+                                AWS_REGION="us-east-1"
+                                ECR_REGISTRY="${acc_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                                IMAGE="${ECR_REGISTRY}/${project}/${component}:${appVersion}"
 
-                            echo "Building image: ${IMAGE}"
+                                echo "Logging in to AWS ECR..."
 
-                            docker build \
-                                -t "${IMAGE}" \
-                                .
+                                aws ecr get-login-password \
+                                    --region "${AWS_REGION}" |
+                                docker login \
+                                    --username AWS \
+                                    --password-stdin "${ECR_REGISTRY}"
 
-                            echo "Docker build completed successfully."
-                        '''
+                                echo "Building Docker image:"
+                                echo "${IMAGE}"
+
+                                docker build \
+                                    -t "${IMAGE}" \
+                                    .
+
+                                echo "Docker image built successfully."
+                            '''
+                        }
                     }
                 }
             }
@@ -181,29 +242,34 @@ pipeline {
             steps {
                 script {
 
-                    echo "Scanning Dockerfile with Trivy..."
+                    echo 'Starting Trivy Dockerfile scan...'
 
-                    def dockerfileScan = sh(
-                        script: '''
-                            set +e
+                    def dockerfileScan
 
-                            trivy config \
-                                --exit-code 1 \
-                                --severity HIGH,CRITICAL \
-                                --format table \
-                                ./Dockerfile
+                    dir('piplines/catalogue') {
 
-                            exit $?
-                        ''',
-                        returnStatus: true
-                    )
+                        dockerfileScan = sh(
+                            script: '''
+                                set +e
 
-                    echo "Dockerfile Trivy exit code: ${dockerfileScan}"
+                                trivy config \
+                                    --exit-code 1 \
+                                    --severity HIGH,CRITICAL \
+                                    --format table \
+                                    ./Dockerfile
 
-                    echo "Scanning Docker image with Trivy..."
+                                exit $?
+                            ''',
+                            returnStatus: true
+                        )
+                    }
+
+                    echo "Dockerfile scan exit code: ${dockerfileScan}"
+
+                    echo 'Starting Trivy image scan...'
 
                     def imageScan = sh(
-                        script: '''
+                        script: """
                             set +e
 
                             trivy image \
@@ -214,22 +280,21 @@ pipeline {
                                 --format table \
                                 "${acc_id}.dkr.ecr.us-east-1.amazonaws.com/${project}/${component}:${appVersion}"
 
-                            exit $?
-                        ''',
+                            exit \$?
+                        """,
                         returnStatus: true
                     )
 
-                    echo "Docker image Trivy exit code: ${imageScan}"
+                    echo "Docker image scan exit code: ${imageScan}"
 
                     if (dockerfileScan != 0 || imageScan != 0) {
                         error '''
-Trivy found HIGH/CRITICAL security issues
-in the Dockerfile and/or Docker image.
+Trivy found HIGH/CRITICAL security vulnerabilities.
 Pipeline failed.
 '''
                     }
 
-                    echo "Trivy security scan passed."
+                    echo 'Trivy security scans passed.'
                 }
             }
         }
@@ -242,6 +307,7 @@ Pipeline failed.
                         credentials: 'aws-creds',
                         region: 'us-east-1'
                     ) {
+
                         sh '''
                             set -e
 
@@ -257,7 +323,8 @@ Pipeline failed.
                                 --username AWS \
                                 --password-stdin "${ECR_REGISTRY}"
 
-                            echo "Pushing image: ${IMAGE}"
+                            echo "Pushing Docker image:"
+                            echo "${IMAGE}"
 
                             docker push "${IMAGE}"
 
@@ -277,18 +344,20 @@ Pipeline failed.
 
             steps {
                 script {
-                    echo "Deploying ${project}/${component}:${env.appVersion}"
+
+                    echo "Starting deployment..."
 
                     sh '''
                         set -e
 
                         echo "Deploying application..."
-                        echo "Application: ${project}"
-                        echo "Component: ${component}"
-                        echo "Version: ${appVersion}"
+                        echo "Project    : ${project}"
+                        echo "Component  : ${component}"
+                        echo "Version    : ${appVersion}"
 
-                        # Add your actual deployment commands here.
-                        echo "Deployment completed."
+                        # Add your actual deployment command here.
+
+                        echo "Deployment completed successfully."
                     '''
                 }
             }
