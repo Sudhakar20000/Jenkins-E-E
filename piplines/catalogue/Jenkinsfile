@@ -7,10 +7,10 @@ pipeline {
     }
 
     environment {
-        appVersion = ''
-        acc_id = '129678139522'
-        project = 'flipkart'
-        component = 'catalogue'
+        APP_VERSION = ''
+        ACC_ID = '129678139522'
+        PROJECT = 'flipkart'
+        COMPONENT = 'catalogue'
     }
 
     parameters {
@@ -23,7 +23,7 @@ pipeline {
 
     options {
         disableConcurrentBuilds()
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')
     }
 
     stages {
@@ -33,30 +33,23 @@ pipeline {
                 dir('piplines/catalogue') {
                     script {
 
-                        echo "Reading version from package.json..."
+                        echo 'Reading application version from package.json...'
 
-                        sh '''
-                            echo "Current directory:"
-                            pwd
+                        def packageJson = readJSON file: 'package.json'
 
-                            echo "package.json:"
-                            cat package.json
+                        echo "Package name: ${packageJson.name}"
+                        echo "Package version: ${packageJson.version}"
 
-                            echo "Checking Node:"
-                            node --version
-                        '''
+                        if (!packageJson.version) {
+                            error 'Version is missing from package.json'
+                        }
 
-                        env.appVersion = sh(
-                            script: 'node -p "require(\'./package.json\').version"',
-                            returnStdout: true
-                        ).trim()
+                        env.APP_VERSION = packageJson.version.toString().trim()
 
-                       
-                        echo "Application Version: ${env.appVersion}"
-                        
+                        echo "Application Version: ${env.APP_VERSION}"
 
-                        if (!env.appVersion || env.appVersion == 'null') {
-                            error "Application version could not be read from package.json"
+                        if (!env.APP_VERSION || env.APP_VERSION == 'null') {
+                            error 'Application version could not be read from package.json'
                         }
                     }
                 }
@@ -104,11 +97,13 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 dir('piplines/catalogue') {
+
                     withSonarQubeEnv('sonar-server') {
+
                         sh """
                             set -e
 
-                            echo "Starting SonarQube analysis..."
+                            echo "Starting SonarQube Analysis..."
 
                             ${tool 'sonar-8'}/bin/sonar-scanner
 
@@ -121,20 +116,22 @@ pipeline {
 
         stage('SonarQube Quality Gate') {
             steps {
+
                 timeout(time: 10, unit: 'MINUTES') {
+
                     script {
 
                         echo 'Waiting for SonarQube Quality Gate...'
 
                         def qg = waitForQualityGate()
 
-                        echo "SonarQube Quality Gate status: ${qg.status}"
+                        echo "SonarQube Quality Gate Status: ${qg.status}"
 
                         if (qg.status != 'OK') {
-                            error "Pipeline aborted: SonarQube Quality Gate status is ${qg.status}"
+                            error "Pipeline aborted because SonarQube Quality Gate status is: ${qg.status}"
                         }
 
-                        echo 'SonarQube Quality Gate passed.'
+                        echo "SonarQube Quality Gate passed."
                     }
                 }
             }
@@ -142,18 +139,20 @@ pipeline {
 
         stage('Check Dependabot Alerts') {
             steps {
+
                 withCredentials([
                     string(
                         credentialsId: 'github-token',
                         variable: 'GH_TOKEN'
                     )
                 ]) {
+
                     sh '''
                         set -e
 
                         REPO="daws-90s/catalogue"
 
-                        echo "Checking Dependabot alerts..."
+                        echo "Checking Dependabot Alerts..."
                         echo "Repository: ${REPO}"
 
                         curl -sS -L \
@@ -163,7 +162,7 @@ pipeline {
                             "https://api.github.com/repos/${REPO}/dependabot/alerts?state=open" \
                             -o alerts.json
 
-                        echo "---- Open Dependabot Alerts ----"
+                        echo "Open Dependabot Alerts:"
 
                         jq -r '
                             .[] |
@@ -184,11 +183,16 @@ pipeline {
                         echo "High/Critical alert count: ${HIGH_CRITICAL_COUNT}"
 
                         if [ "${HIGH_CRITICAL_COUNT}" -gt 0 ]; then
+
                             echo "Found ${HIGH_CRITICAL_COUNT} High/Critical dependency alert(s)."
                             echo "Failing pipeline."
+
                             exit 1
+
                         else
+
                             echo "No High/Critical dependency alerts found."
+
                         fi
                     '''
                 }
@@ -197,10 +201,13 @@ pipeline {
 
         stage('Docker Build') {
             steps {
+
                 script {
 
                     echo "Building Docker image..."
-                    echo "Application version: ${env.appVersion}"
+                    echo "Application: ${env.PROJECT}"
+                    echo "Component: ${env.COMPONENT}"
+                    echo "Version: ${env.APP_VERSION}"
 
                     withAWS(
                         credentials: 'aws-creds',
@@ -213,8 +220,13 @@ pipeline {
                                 set -e
 
                                 AWS_REGION="us-east-1"
-                                ECR_REGISTRY="${acc_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-                                IMAGE="${ECR_REGISTRY}/${project}/${component}:${appVersion}"
+
+                                ECR_REGISTRY="${ACC_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+                                IMAGE="${ECR_REGISTRY}/${PROJECT}/${COMPONENT}:${APP_VERSION}"
+
+                                echo "ECR Registry: ${ECR_REGISTRY}"
+                                echo "Docker Image: ${IMAGE}"
 
                                 echo "Logging in to AWS ECR..."
 
@@ -224,8 +236,7 @@ pipeline {
                                     --username AWS \
                                     --password-stdin "${ECR_REGISTRY}"
 
-                                echo "Building Docker image:"
-                                echo "${IMAGE}"
+                                echo "Building Docker image..."
 
                                 docker build \
                                     -t "${IMAGE}" \
@@ -241,9 +252,10 @@ pipeline {
 
         stage('Trivy Scan') {
             steps {
+
                 script {
 
-                    echo 'Starting Trivy Dockerfile scan...'
+                    echo "Starting Trivy security scan..."
 
                     def dockerfileScan
 
@@ -259,7 +271,11 @@ pipeline {
                                     --format table \
                                     ./Dockerfile
 
-                                exit $?
+                                EXIT_CODE=$?
+
+                                echo "Dockerfile Trivy exit code: ${EXIT_CODE}"
+
+                                exit ${EXIT_CODE}
                             ''',
                             returnStatus: true
                         )
@@ -267,11 +283,15 @@ pipeline {
 
                     echo "Dockerfile scan exit code: ${dockerfileScan}"
 
-                    echo 'Starting Trivy image scan...'
+                    echo "Scanning Docker image..."
 
                     def imageScan = sh(
-                        script: """
+                        script: '''
                             set +e
+
+                            IMAGE="${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${APP_VERSION}"
+
+                            echo "Scanning image: ${IMAGE}"
 
                             trivy image \
                                 --scanners vuln \
@@ -279,30 +299,39 @@ pipeline {
                                 --exit-code 1 \
                                 --severity HIGH,CRITICAL \
                                 --format table \
-                                "${acc_id}.dkr.ecr.us-east-1.amazonaws.com/${project}/${component}:${appVersion}"
+                                "${IMAGE}"
 
-                            exit \$?
-                        """,
+                            EXIT_CODE=$?
+
+                            echo "Docker image Trivy exit code: ${EXIT_CODE}"
+
+                            exit ${EXIT_CODE}
+                        ''',
                         returnStatus: true
                     )
 
                     echo "Docker image scan exit code: ${imageScan}"
 
                     if (dockerfileScan != 0 || imageScan != 0) {
+
                         error '''
 Trivy found HIGH/CRITICAL security vulnerabilities.
-Pipeline failed.
+Pipeline failed because the security scan did not pass.
 '''
+
                     }
 
-                    echo 'Trivy security scans passed.'
+                    echo "Trivy scans passed successfully."
                 }
             }
         }
 
         stage('ECR Image Push') {
             steps {
+
                 script {
+
+                    echo "Pushing Docker image to ECR..."
 
                     withAWS(
                         credentials: 'aws-creds',
@@ -313,10 +342,15 @@ Pipeline failed.
                             set -e
 
                             AWS_REGION="us-east-1"
-                            ECR_REGISTRY="${acc_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-                            IMAGE="${ECR_REGISTRY}/${project}/${component}:${appVersion}"
 
-                            echo "Logging in to AWS ECR..."
+                            ECR_REGISTRY="${ACC_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+                            IMAGE="${ECR_REGISTRY}/${PROJECT}/${COMPONENT}:${APP_VERSION}"
+
+                            echo "ECR Registry: ${ECR_REGISTRY}"
+                            echo "Image: ${IMAGE}"
+
+                            echo "Logging in to ECR..."
 
                             aws ecr get-login-password \
                                 --region "${AWS_REGION}" |
@@ -324,8 +358,7 @@ Pipeline failed.
                                 --username AWS \
                                 --password-stdin "${ECR_REGISTRY}"
 
-                            echo "Pushing Docker image:"
-                            echo "${IMAGE}"
+                            echo "Pushing image..."
 
                             docker push "${IMAGE}"
 
@@ -337,6 +370,7 @@ Pipeline failed.
         }
 
         stage('Deploy') {
+
             when {
                 expression {
                     params.DEPLOY
@@ -344,6 +378,7 @@ Pipeline failed.
             }
 
             steps {
+
                 script {
 
                     echo "Starting deployment..."
@@ -352,9 +387,13 @@ Pipeline failed.
                         set -e
 
                         echo "Deploying application..."
-                        echo "Project    : ${project}"
-                        echo "Component  : ${component}"
-                        echo "Version    : ${appVersion}"
+
+                        echo "Project: ${PROJECT}"
+                        echo "Component: ${COMPONENT}"
+                        echo "Version: ${APP_VERSION}"
+
+                        echo "Docker Image:"
+                        echo "${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${APP_VERSION}"
 
                         # Add your actual deployment command here.
 
