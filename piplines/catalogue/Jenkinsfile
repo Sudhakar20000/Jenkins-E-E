@@ -29,18 +29,16 @@ pipeline {
     stages {
 
           stages {
-                stage('Read version'){
-                    steps{
-                        script {
-                            def packageJson = readJSON file: 'package.json'
-                            // Extract the version property
-                            appVersion = packageJson.version
-                            echo "The application version is: ${appVersion}"
-                        }
+                    stage('Read Version') {
+                steps {
+                    script {
+                        def packageJson = readJSON file: 'workspaces/flipkart/pipelines/catalogue/package.json'
+                        def appVersion = packageJson.version
+                        echo "The version is: ${appVersion}"
                     }
                 }
-
-
+            }
+        }
 
         stage('Install Dependencies') {
             steps {
