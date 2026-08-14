@@ -30,20 +30,23 @@ pipeline {
 
         stage('Read version') {
             steps {
-                script {
-                    // Evaluates the version directly using node's built-in require mechanism
-                    def appVersion = sh(
-                        script: "node -p \"require('./package.json').version\"", 
-                        returnStdout: true
-                    ).trim()
-                    
-                    // Assign to the global environment block
-                    env.APP_VERSION = appVersion
-                    
-                    echo "The application version parsed via Node is: ${env.APP_VERSION}"
+                dir('piplines/catalogue') {
+                    script {
+                        // Change directory to sub-folder and extract version using node
+                        def appVersion = sh(
+                            script: "node -p \"require('./package.json').version\"", 
+                            returnStdout: true
+                        ).trim()
+                        
+                        // Assign to the global environment block
+                        env.APP_VERSION = appVersion
+                        
+                        echo "The application version parsed via Node is: ${env.APP_VERSION}"
+                    }
                 }
             }
         }
+
 
 
         stage('Install Dependencies') {
