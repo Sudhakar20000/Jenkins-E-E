@@ -10,18 +10,14 @@ pipeline {
         stage('Read Package Info') {
             steps {
                 script {
-                    // Read and parse the JSON file
-                    def packageJson = readJSON file: 'package.json'
-                    
-                    // Extract fields into variables
-                    def appName = packageJson.name
-                    def appVersion = packageJson.version
-                    
-                    // Print values
-                    echo "Building ${appName} - Version: ${appVersion}"
-                    
-                    // Optional: Use a version for the Jenkins build display name
-                    currentBuild.displayName = "#${BUILD_NUMBER}-${appVersion}"
+                    // Change context to the folder where the app code lives
+                    dir('piplines/catalogue') {
+                        def packageJson = readJSON file: 'package.json'
+                        def appName = packageJson.name
+                        def appVersion = packageJson.version
+                        
+                        echo "Building ${appName} - Version: ${appVersion}"
+                    }
                 }
             }
         }
