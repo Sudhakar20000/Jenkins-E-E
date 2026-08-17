@@ -1,38 +1,26 @@
 pipeline {
-
     agent {
         node {
             label 'Agent-node'
         }
     }
-
-    environment {
-        APP_VERSION = ''
-        APP_NAME = ''
-    }
-
     stages {
         stage('Read Package Info') {
             steps {
                 script {
                     dir('piplines/catalogue') {
                         def packageJson = readJSON file: 'package.json'
-
                         env.APP_NAME = packageJson.name
                         env.APP_VERSION = packageJson.version
-
                         echo "Building ${env.APP_NAME} - Version: ${env.APP_VERSION}"
                     }
                 }
             }
         }
-
         stage('Another Stage') {
             steps {
                 echo "Using version: ${env.APP_VERSION}"
                 echo "Using app name: ${env.APP_NAME}"
-
-                // You can also use ${APP_VERSION} directly in many Jenkins steps
             }
         }
     }
