@@ -6,19 +6,33 @@ pipeline {
         }
     }
 
+    environment {
+        APP_VERSION = ''
+        APP_NAME = ''
+    }
+
     stages {
         stage('Read Package Info') {
             steps {
                 script {
-                    // Change context to the folder where the app code lives
                     dir('piplines/catalogue') {
                         def packageJson = readJSON file: 'package.json'
-                        def appName = packageJson.name
-                        def appVersion = packageJson.version
-                        
-                        echo "Building ${appName} - Version: ${appVersion}"
+
+                        env.APP_NAME = packageJson.name
+                        env.APP_VERSION = packageJson.version
+
+                        echo "Building ${env.APP_NAME} - Version: ${env.APP_VERSION}"
                     }
                 }
+            }
+        }
+
+        stage('Another Stage') {
+            steps {
+                echo "Using version: ${env.APP_VERSION}"
+                echo "Using app name: ${env.APP_NAME}"
+
+                // You can also use ${APP_VERSION} directly in many Jenkins steps
             }
         }
     }
