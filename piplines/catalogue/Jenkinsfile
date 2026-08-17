@@ -42,5 +42,25 @@ pipeline {
                 } 
             }
         }
+         stage('SonarQube Analysis') {
+            steps {
+                // 'My SonarQube Server' must match the name configured in Jenkins System Settings
+                withSonarQubeEnv('sonar-scanner') {
+                    sh "${tool 'sonar-8'}/bin/sonar-scanner"
+                }
+            }
+        }
+        stage('SonarQube Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    script {
+                        def qg = waitForQualityGate() // Pauses pipeline
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
     }
 }
