@@ -22,9 +22,11 @@ pipeline {
        stage('Install Dependencies') {
             steps {
                 script {
+                    dir('piplines/catalogue') {
                     sh """
                         npm install
                     """
+                    }
                 } 
             }
         }
@@ -32,9 +34,11 @@ pipeline {
         stage('Unit tests') {
             steps {
                 script {
+                    dir('piplines/catalogue') {
                     sh """
                         npm test
                     """
+                    }
                 } 
             }
         }
