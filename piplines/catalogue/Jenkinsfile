@@ -19,9 +19,23 @@ pipeline {
                 }
             }
         }
-        stage('Another Stage') {
+       stage('Install Dependencies') {
             steps {
-                echo "Using version: ${appVersion}"
+                script {
+                    sh """
+                        npm install
+                    """
+                } 
+            }
+        }
+        // this command gives us coverage report and test cases report, sonarqube access this to check quality gate
+        stage('Unit tests') {
+            steps {
+                script {
+                    sh """
+                        npm test
+                    """
+                } 
             }
         }
     }
