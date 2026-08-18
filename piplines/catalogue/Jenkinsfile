@@ -1,9 +1,8 @@
 pipeline {
-    agent {
-        node {
+    agent any
+        /* node {
             label 'Agent-node'
-        }
-    }
+        } */
      environment {
         def appVersion = ""
      }
