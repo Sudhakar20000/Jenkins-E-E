@@ -1,0 +1,59 @@
+#!/bin/bash
+set -ex
+exec > >(tee /var/log/user-data.log) 2>&1
+
+
+growpart /dev/nvme0n1 ${partition_number}
+pvresize /dev/nvme0n1p4
+
+lvextend -r -L +${extend_size}G /dev/RootVG/varVol
+xfs_growfs /var
+
+lvextend -r -L +${extend_size}G /dev/RootVG/homeVol
+xfs_growfs /home
+
+lvextend -r -L +${extend_size}G /dev/RootVG/rootVol
+xfs_growfs /
+
+yum install fontconfig java-21-openjdk -y
+dnf module disable nodejs -y
+dnf module disable nodejs -y
+dnf install nodejs -y
+dnf -y install dnf-plugins-core
+dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ec2-user
+sudo dnf install git -y
+
+
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.73.0
+
+# eksctl
+# for ARM systems, set ARCH to: `arm64`, `armv6` or `armv7`
+ARCH=amd64
+PLATFORM=$(uname -s)_$ARCH
+
+curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
+
+# kubectl
+curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.35.3/2026-04-08/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+cp kubectl /usr/local/bin/kubectl
+
+# kubens (from kubectx project, pure bash version)
+curl -sLo /tmp/kubens https://raw.githubusercontent.com/ahmetb/kubectx/master/kubens
+install -m 0755 /tmp/kubens /usr/local/bin/kubens && rm /tmp/kubens
+
+# k9s
+curl -sLO https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz
+tar -xzf k9s_Linux_amd64.tar.gz -C /tmp k9s && rm k9s_Linux_amd64.tar.gz
+install -m 0755 /tmp/k9s /usr/local/bin/k9s && rm /tmp/k9s
+
+#Helm
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4
+chmod 700 get_helm.sh
+./get_helm.sh
