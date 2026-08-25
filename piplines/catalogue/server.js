@@ -24,10 +24,18 @@ const expLogger = expPino({
     logger: logger
 });
 
+// --------------------------------------------------
 // MongoDB
+// --------------------------------------------------
+
 let db;
 let collection;
 let mongoConnected = false;
+
+
+// --------------------------------------------------
+// Express application
+// --------------------------------------------------
 
 const app = express();
 
@@ -62,12 +70,15 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.urlencoded({
+    extended: true
+}));
+
 app.use(bodyParser.json());
 
 
 // --------------------------------------------------
-// Health check
+// Health Check
 // --------------------------------------------------
 
 app.get('/health', (req, res) => {
@@ -81,11 +92,13 @@ app.get('/health', (req, res) => {
 
 
 // --------------------------------------------------
-// All products
+// All Products
 // --------------------------------------------------
 
 app.get('/products', (req, res) => {
+
     if (mongoConnected) {
+
         collection
             .find({})
             .toArray()
@@ -96,25 +109,34 @@ app.get('/products', (req, res) => {
                 req.log.error('ERROR', e);
                 res.status(500).send(e);
             });
+
     } else {
+
         req.log.error('database not available');
         res.status(500).send('database not available');
+
     }
 });
 
 
 // --------------------------------------------------
-// Product by SKU
+// Product By SKU
 // --------------------------------------------------
 
 app.get('/product/:sku', (req, res) => {
+
     if (mongoConnected) {
+
         const delay = process.env.GO_SLOW || 0;
 
         setTimeout(() => {
+
             collection
-                .findOne({ sku: req.params.sku })
+                .findOne({
+                    sku: req.params.sku
+                })
                 .then((product) => {
+
                     req.log.info('product', product);
 
                     if (product) {
@@ -122,30 +144,44 @@ app.get('/product/:sku', (req, res) => {
                     } else {
                         res.status(404).send('SKU not found');
                     }
+
                 })
                 .catch((e) => {
+
                     req.log.error('ERROR', e);
                     res.status(500).send(e);
+
                 });
+
         }, delay);
+
     } else {
+
         req.log.error('database not available');
         res.status(500).send('database not available');
+
     }
 });
 
 
 // --------------------------------------------------
-// Products in a category
+// Products In Category
 // --------------------------------------------------
 
 app.get('/products/:cat', (req, res) => {
+
     if (mongoConnected) {
+
         collection
-            .find({ categories: req.params.cat })
-            .sort({ name: 1 })
+            .find({
+                categories: req.params.cat
+            })
+            .sort({
+                name: 1
+            })
             .toArray()
             .then((products) => {
+
                 if (products) {
                     res.json(products);
                 } else {
@@ -153,46 +189,61 @@ app.get('/products/:cat', (req, res) => {
                         'No products for ' + req.params.cat
                     );
                 }
+
             })
             .catch((e) => {
+
                 req.log.error('ERROR', e);
                 res.status(500).send(e);
+
             });
+
     } else {
+
         req.log.error('database not available');
         res.status(500).send('database not available');
+
     }
 });
 
 
 // --------------------------------------------------
-// All categories
+// All Categories
 // --------------------------------------------------
 
 app.get('/categories', (req, res) => {
+
     if (mongoConnected) {
+
         collection
             .distinct('categories')
             .then((categories) => {
                 res.json(categories);
             })
             .catch((e) => {
+
                 req.log.error('ERROR', e);
                 res.status(500).send(e);
+
             });
+
     } else {
+
         req.log.error('database not available');
         res.status(500).send('database not available');
+
     }
 });
 
 
 // --------------------------------------------------
-// Search name and description
+// Search
 // --------------------------------------------------
 
 app.get('/search/:text', (req, res) => {
+
     if (mongoConnected) {
+
         collection
             .find({
                 '$text': {
@@ -201,35 +252,50 @@ app.get('/search/:text', (req, res) => {
             })
             .toArray()
             .then((hits) => {
+
                 res.json(hits);
+
             })
             .catch((e) => {
+
                 req.log.error('ERROR', e);
                 res.status(500).send(e);
+
             });
+
     } else {
+
         req.log.error('database not available');
         res.status(500).send('database not available');
+
     }
 });
 
 
 // --------------------------------------------------
-// MongoDB connection
+// MongoDB Connection
 // --------------------------------------------------
 
 async function mongoConnect() {
+
     try {
+
         const mongoURL =
             process.env.MONGO_URL ||
             'mongodb://mongodb:27017/catalogue';
 
-        const client = await MongoClient.connect(mongoURL, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true
-        });
+        logger.info(`Connecting to MongoDB: ${mongoURL}`);
+
+        const client = await MongoClient.connect(
+            mongoURL,
+            {
+                useNewUrlParser: true,
+                useUnifiedTopology: true
+            }
+        );
 
         db = client.db('catalogue');
+
         collection = db.collection('products');
 
         mongoConnected = true;
@@ -237,9 +303,11 @@ async function mongoConnect() {
         logger.info('MongoDB connected');
 
     } catch (error) {
+
         mongoConnected = false;
 
-        logger.error('ERROR', error);
+        logger.error('MongoDB connection error');
+        logger.error(error);
 
         setTimeout(mongoLoop, 2000);
     }
@@ -247,68 +315,81 @@ async function mongoConnect() {
 
 
 // --------------------------------------------------
-// MongoDB retry loop
+// MongoDB Retry Loop
 // --------------------------------------------------
 
 function mongoLoop() {
+
     mongoConnect().catch((e) => {
-        logger.error('ERROR', e);
+
+        logger.error('MongoDB retry error');
+        logger.error(e);
 
         setTimeout(mongoLoop, 2000);
+
     });
 }
 
 
 // --------------------------------------------------
-// Start application
-// --------------------------------------------------
-//
-// IMPORTANT:
-//
-// Do NOT call app.listen() when this file is imported
-// by Jest.
-//
-// Jest does:
-//     require('../server')
-//
-// If app.listen() is executed during require(), Jest
-// starts the server and subsequent tests get:
-//
-//     EADDRINUSE: address already in use
-//
+// Start Server
 // --------------------------------------------------
 
 let server;
 
 function startServer() {
+
+    // Start MongoDB connection
     mongoLoop();
 
-    const port = process.env.CATALOGUE_SERVER_PORT || '8081';
+    const port =
+        process.env.CATALOGUE_SERVER_PORT || '8081';
 
     server = app.listen(port, () => {
+
         logger.info(`Started on port ${port}`);
+
     });
 
     return server;
 }
 
 
-// Only start the HTTP server when running:
+// --------------------------------------------------
+// IMPORTANT
+// --------------------------------------------------
+//
+// When Jest does:
+//
+//     require('../server')
+//
+// this condition is FALSE.
+//
+// Therefore:
+//   - MongoDB connection does NOT start
+//   - HTTP server does NOT start
+//   - Port 8081 is NOT opened
+//
+// When you run:
+//
 //     node server.js
 //
-// Do NOT start it when running:
-//     jest
-//     npm test
-//     require('./server')
+// this condition is TRUE.
+//
+// Therefore:
+//   - MongoDB starts
+//   - HTTP server starts
+//
+// --------------------------------------------------
 
 if (require.main === module) {
     startServer();
 }
 
 
-// Export app for Jest/Supertest
-module.exports = app;
+// --------------------------------------------------
+// Exports
+// --------------------------------------------------
 
-// Export startServer as well if you need to start the
-// real server from another file.
+module.exports = app;
 module.exports.startServer = startServer;
