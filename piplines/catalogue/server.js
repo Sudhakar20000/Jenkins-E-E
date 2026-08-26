@@ -1,7 +1,6 @@
 const instana = require('@instana/collector');
 
-// Init tracing
-// MUST be done before loading anything else!
+// Instana tracing must be initialized before loading application dependencies.
 instana({
     tracing: {
         enabled: true
@@ -14,6 +13,7 @@ const express = require('express');
 const pino = require('pino');
 const expPino = require('express-pino-logger');
 
+// Logger
 const logger = pino({
     level: 'info',
     prettyPrint: false,
@@ -24,372 +24,337 @@ const expLogger = expPino({
     logger: logger
 });
 
-// --------------------------------------------------
 // MongoDB
-// --------------------------------------------------
-
 let db;
 let collection;
 let mongoConnected = false;
+let mongoClient = null;
 
-
-// --------------------------------------------------
-// Express application
-// --------------------------------------------------
-
+// Express
 const app = express();
 
 app.disable('x-powered-by');
 
+// Logging
 app.use(expLogger);
 
+// CORS / timing headers
 app.use((req, res, next) => {
     res.set('Timing-Allow-Origin', '*');
     res.set('Access-Control-Allow-Origin', '*');
     next();
 });
 
+// Instana custom span annotation
 app.use((req, res, next) => {
-    const dcs = [
-        'asia-northeast2',
-        'asia-south1',
-        'europe-west3',
-        'us-east1',
-        'us-west1'
-    ];
+    try {
+        const dcs = [
+            'asia-northeast2',
+            'asia-south1',
+            'europe-west3',
+            'us-east1',
+            'us-west1'
+        ];
 
-    const span = instana.currentSpan();
+        const span = instana.currentSpan();
 
-    if (span) {
-        span.annotate(
-            'custom.sdk.tags.datacenter',
-            dcs[Math.floor(Math.random() * dcs.length)]
-        );
+        if (span) {
+            span.annotate(
+                'custom.sdk.tags.datacenter',
+                dcs[Math.floor(Math.random() * dcs.length)]
+            );
+        }
+    } catch (error) {
+        // Do not allow tracing errors to break the application.
+        logger.warn(error, 'Unable to annotate Instana span');
     }
 
     next();
 });
 
-app.use(bodyParser.urlencoded({
-    extended: true
-}));
-
+// Body parsers
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-
-// --------------------------------------------------
-// Health Check
-// --------------------------------------------------
-
+/*
+ * Health check
+ */
 app.get('/health', (req, res) => {
     const stat = {
         app: 'OK',
         mongo: mongoConnected
     };
 
-    res.json(stat);
+    res.status(200).json(stat);
 });
 
+/*
+ * Get all products
+ */
+app.get('/products', async (req, res) => {
+    if (!mongoConnected || !collection) {
+        req.log.error('database not available');
+        return res.status(500).send('database not available');
+    }
 
-// --------------------------------------------------
-// All Products
-// --------------------------------------------------
+    try {
+        const products = await collection.find({}).toArray();
+        return res.status(200).json(products);
+    } catch (error) {
+        req.log.error(error, 'ERROR');
+        return res.status(500).send(error);
+    }
+});
 
-app.get('/products', (req, res) => {
+/*
+ * Get product by SKU
+ */
+app.get('/product/:sku', (req, res) => {
+    if (!mongoConnected || !collection) {
+        req.log.error('database not available');
+        return res.status(500).send('database not available');
+    }
 
-    if (mongoConnected) {
+    // Optionally slow this down.
+    const delay = Number(process.env.GO_SLOW) || 0;
 
-        collection
-            .find({})
-            .toArray()
-            .then((products) => {
-                res.json(products);
-            })
-            .catch((e) => {
-                req.log.error('ERROR', e);
-                res.status(500).send(e);
+    setTimeout(async () => {
+        try {
+            const product = await collection.findOne({
+                sku: req.params.sku
             });
 
-    } else {
+            req.log.info({
+                sku: req.params.sku,
+                product: product
+            }, 'product');
 
-        req.log.error('database not available');
-        res.status(500).send('database not available');
+            if (product) {
+                return res.status(200).json(product);
+            }
 
-    }
+            return res.status(404).send('SKU not found');
+        } catch (error) {
+            req.log.error(error, 'ERROR');
+            return res.status(500).send(error);
+        }
+    }, delay);
 });
 
-
-// --------------------------------------------------
-// Product By SKU
-// --------------------------------------------------
-
-app.get('/product/:sku', (req, res) => {
-
-    if (mongoConnected) {
-
-        const delay = process.env.GO_SLOW || 0;
-
-        setTimeout(() => {
-
-            collection
-                .findOne({
-                    sku: req.params.sku
-                })
-                .then((product) => {
-
-                    req.log.info('product', product);
-
-                    if (product) {
-                        res.json(product);
-                    } else {
-                        res.status(404).send('SKU not found');
-                    }
-
-                })
-                .catch((e) => {
-
-                    req.log.error('ERROR', e);
-                    res.status(500).send(e);
-
-                });
-
-        }, delay);
-
-    } else {
-
+/*
+ * Get products in a category
+ */
+app.get('/products/:cat', async (req, res) => {
+    if (!mongoConnected || !collection) {
         req.log.error('database not available');
-        res.status(500).send('database not available');
-
+        return res.status(500).send('database not available');
     }
-});
 
-
-// --------------------------------------------------
-// Products In Category
-// --------------------------------------------------
-
-app.get('/products/:cat', (req, res) => {
-
-    if (mongoConnected) {
-
-        collection
+    try {
+        const products = await collection
             .find({
                 categories: req.params.cat
             })
             .sort({
                 name: 1
             })
-            .toArray()
-            .then((products) => {
+            .toArray();
 
-                if (products) {
-                    res.json(products);
-                } else {
-                    res.status(404).send(
-                        'No products for ' + req.params.cat
-                    );
-                }
-
-            })
-            .catch((e) => {
-
-                req.log.error('ERROR', e);
-                res.status(500).send(e);
-
-            });
-
-    } else {
-
-        req.log.error('database not available');
-        res.status(500).send('database not available');
-
+        return res.status(200).json(products);
+    } catch (error) {
+        req.log.error(error, 'ERROR');
+        return res.status(500).send(error);
     }
 });
 
-
-// --------------------------------------------------
-// All Categories
-// --------------------------------------------------
-
-app.get('/categories', (req, res) => {
-
-    if (mongoConnected) {
-
-        collection
-            .distinct('categories')
-            .then((categories) => {
-                res.json(categories);
-            })
-            .catch((e) => {
-
-                req.log.error('ERROR', e);
-                res.status(500).send(e);
-
-            });
-
-    } else {
-
+/*
+ * Get all categories
+ */
+app.get('/categories', async (req, res) => {
+    if (!mongoConnected || !collection) {
         req.log.error('database not available');
-        res.status(500).send('database not available');
-
+        return res.status(500).send('database not available');
     }
-});
-
-
-// --------------------------------------------------
-// Search
-// --------------------------------------------------
-
-app.get('/search/:text', (req, res) => {
-
-    if (mongoConnected) {
-
-        collection
-            .find({
-                '$text': {
-                    '$search': req.params.text
-                }
-            })
-            .toArray()
-            .then((hits) => {
-
-                res.json(hits);
-
-            })
-            .catch((e) => {
-
-                req.log.error('ERROR', e);
-                res.status(500).send(e);
-
-            });
-
-    } else {
-
-        req.log.error('database not available');
-        res.status(500).send('database not available');
-
-    }
-});
-
-
-// --------------------------------------------------
-// MongoDB Connection
-// --------------------------------------------------
-
-async function mongoConnect() {
 
     try {
+        const categories = await collection.distinct('categories');
 
+        return res.status(200).json(categories);
+    } catch (error) {
+        req.log.error(error, 'ERROR');
+        return res.status(500).send(error);
+    }
+});
+
+/*
+ * Search products by name/description
+ */
+app.get('/search/:text', async (req, res) => {
+    if (!mongoConnected || !collection) {
+        req.log.error('database not available');
+        return res.status(500).send('database not available');
+    }
+
+    try {
+        const hits = await collection
+            .find({
+                $text: {
+                    $search: req.params.text
+                }
+            })
+            .toArray();
+
+        return res.status(200).json(hits);
+    } catch (error) {
+        req.log.error(error, 'ERROR');
+        return res.status(500).send(error);
+    }
+});
+
+/*
+ * MongoDB connection
+ */
+async function mongoConnect() {
+    try {
         const mongoURL =
             process.env.MONGO_URL ||
             'mongodb://mongodb:27017/catalogue';
 
-        logger.info(`Connecting to MongoDB: ${mongoURL}`);
-
-        const client = await MongoClient.connect(
-            mongoURL,
+        logger.info(
             {
-                useNewUrlParser: true,
-                useUnifiedTopology: true
-            }
+                mongoURL: mongoURL.replace(
+                    /\/\/([^:]+):([^@]+)@/,
+                    '//$1:****@'
+                )
+            },
+            'Connecting to MongoDB'
         );
 
-        db = client.db('catalogue');
+        mongoClient = new MongoClient(mongoURL, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
 
+        await mongoClient.connect();
+
+        db = mongoClient.db('catalogue');
         collection = db.collection('products');
+
+        /*
+         * Verify the connection.
+         */
+        await db.command({
+            ping: 1
+        });
 
         mongoConnected = true;
 
         logger.info('MongoDB connected');
-
     } catch (error) {
-
         mongoConnected = false;
+        db = null;
+        collection = null;
 
-        logger.error('MongoDB connection error');
-        logger.error(error);
+        logger.error(error, 'MongoDB connection ERROR');
 
+        /*
+         * Close partially opened client.
+         */
+        if (mongoClient) {
+            try {
+                await mongoClient.close();
+            } catch (closeError) {
+                logger.error(closeError, 'MongoDB close ERROR');
+            }
+
+            mongoClient = null;
+        }
+
+        /*
+         * Do not immediately recurse through the promise chain.
+         * mongoLoop() will retry.
+         */
         setTimeout(mongoLoop, 2000);
     }
 }
 
-
-// --------------------------------------------------
-// MongoDB Retry Loop
-// --------------------------------------------------
-
+/*
+ * MongoDB retry loop
+ */
 function mongoLoop() {
+    if (mongoConnected) {
+        return;
+    }
 
-    mongoConnect().catch((e) => {
+    mongoConnect().catch((error) => {
+        mongoConnected = false;
 
-        logger.error('MongoDB retry error');
-        logger.error(e);
+        logger.error(error, 'MongoDB retry ERROR');
 
         setTimeout(mongoLoop, 2000);
-
     });
 }
 
+/*
+ * Start MongoDB connection.
+ *
+ * During Jest tests, allow the test suite to control/mock
+ * the database state instead of forcing a real MongoDB
+ * connection.
+ */
+if (process.env.NODE_ENV !== 'test') {
+    mongoLoop();
+}
 
-// --------------------------------------------------
-// Start Server
-// --------------------------------------------------
-
+/*
+ * Start HTTP server only when this file is executed
+ * directly by Node.
+ *
+ * This prevents Jest/Supertest from unnecessarily
+ * creating a listening server.
+ */
 let server;
 
-function startServer() {
-
-    // Start MongoDB connection
-    mongoLoop();
-
-    const port =
-        process.env.CATALOGUE_SERVER_PORT || '8081';
+if (require.main === module) {
+    const port = process.env.CATALOGUE_SERVER_PORT || '8081';
 
     server = app.listen(port, () => {
-
         logger.info(`Started on port ${port}`);
-
     });
-
-    return server;
 }
 
+/*
+ * Expose app.
+ *
+ * Keep these properties available so tests can manipulate
+ * the MongoDB state when required.
+ */
+app.mongo = {
+    get connected() {
+        return mongoConnected;
+    },
 
-// --------------------------------------------------
-// IMPORTANT
-// --------------------------------------------------
-//
-// When Jest does:
-//
-//     require('../server')
-//
-// this condition is FALSE.
-//
-// Therefore:
-//   - MongoDB connection does NOT start
-//   - HTTP server does NOT start
-//   - Port 8081 is NOT opened
-//
-// When you run:
-//
-//     node server.js
-//
-// this condition is TRUE.
-//
-// Therefore:
-//   - MongoDB starts
-//   - HTTP server starts
-//
-// --------------------------------------------------
+    set connected(value) {
+        mongoConnected = value;
+    },
 
-if (require.main === module) {
-    startServer();
-}
+    get collection() {
+        return collection;
+    },
 
+    set collection(value) {
+        collection = value;
+    },
 
-// --------------------------------------------------
-// Exports
-// --------------------------------------------------
+    get db() {
+        return db;
+    }
+};
+
+app.mongoConnect = mongoConnect;
+
+app.mongoLoop = mongoLoop;
+
+app.server = server;
 
 module.exports = app;
-module.exports.startServer = startServer;
